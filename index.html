@@ -652,7 +652,7 @@ try {
 </script>
 <script>
 'use strict';
-// VERSION: v1.3.0 - PDF attachment support (pdf-lib merge), robust iPad init
+// VERSION: v1.3.2 - Rename _config.json to project-data.json
 
 /* ═══════════════════════════════════════
    EMBEDDED LOGOS (base64 PNG)
@@ -668,7 +668,9 @@ const LOGO_EA_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAH0AAAClCAYAAABx7fJnAAAAGXRFWHRTb2Z
 ═══════════════════════════════════════ */
 const S = {
   step: 0,
-  fsSupported: ('showDirectoryPicker' in window),
+  fsSupported:    ('showDirectoryPicker' in window),
+  iosDevice:      /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1),
+  shareSupported: (typeof navigator.share === 'function'),
 
   // Checklist files — stored as ArrayBuffers immediately on load (fixes NotReadableError)
   excelBuffer:    null,
@@ -960,11 +962,11 @@ async function pickProjectFolder() {
     // Pre-fill address from project name
     if (!S.form.address) S.form.address = S.project.name;
 
-    // Try to load saved email_to from 06_Inspections/_config.json
+    // Try to load saved email_to from 06_Inspections/project-data.json
     loading('Checking saved config…');
     try {
       const siDir = await getOrCreate06(dir);
-      const cfgFH = await siDir.getFileHandle('_config.json');
+      const cfgFH = await siDir.getFileHandle('project-data.json');
       const file  = await cfgFH.getFile();
       const text  = await file.text();
       const cfg   = JSON.parse(text);
@@ -996,19 +998,53 @@ async function getOrCreate06(projHandle) {
 async function saveConfig(projHandle) {
   try {
     const siDir = await getOrCreate06(projHandle);
-    const fh = await siDir.getFileHandle('_config.json', { create: true });
+    const fh = await siDir.getFileHandle('project-data.json', { create: true });
     const w  = await fh.createWritable();
     await w.write(JSON.stringify({
-      emailTo:   S.form.emailTo,
-      client:    S.form.client,
-      builder:   S.form.builder,
-      inspector: S.form.inspector
+      jobNumber:   S.project.jobNumber,
+      projectName: S.project.name,
+      address:     S.form.address,
+      emailTo:     S.form.emailTo,
+      client:      S.form.client,
+      builder:     S.form.builder,
+      inspector:   S.form.inspector
     }, null, 2));
     await w.close();
   } catch (e) { console.warn('Could not save config:', e); }
 }
 
 /* ─── Manual file fallback ─── */
+async function handleConfigFile(file) {
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const cfg  = JSON.parse(text);
+    // Pull project identity from the filename path hint or cfg fields
+    // project-data.json lives in 06_Inspections/ — parent folder name = project folder
+    // On iOS we only get the filename, so we rely on cfg fields
+    if (cfg.jobNumber || cfg.projectNumber) {
+      S.project.jobNumber = cfg.jobNumber || cfg.projectNumber || '';
+    }
+    if (cfg.projectName || cfg.name) {
+      S.project.name      = cfg.projectName || cfg.name || '';
+      S.project.folderName = S.project.jobNumber
+        ? S.project.jobNumber + ' ' + S.project.name
+        : S.project.name;
+    }
+    if (cfg.emailTo)   S.form.emailTo   = cfg.emailTo;
+    if (cfg.client)    S.form.client    = cfg.client;
+    if (cfg.builder)   S.form.builder   = cfg.builder;
+    if (cfg.inspector) S.form.inspector = cfg.inspector;
+    if (cfg.address)   S.form.address   = cfg.address;
+    // Mark as having a "project" (no folder handle on iOS, but details loaded)
+    S.projectHandle = { _iosMode: true };
+    render();
+    toast('✓ Project loaded: ' + (S.project.jobNumber || S.project.name || 'config'), 'success');
+  } catch (e) {
+    toast('Could not read config: ' + e.message, 'error');
+  }
+}
+
 async function handleExcelFile(file) {
   if (!file) return;
   loading('Parsing checklist…');
@@ -1175,26 +1211,49 @@ function renderSetup() {
 ═══════════════════════════════════════ */
 function renderProject() {
   const hasPrj = !!S.projectHandle;
+  const isIOS  = S.iosDevice;
   return `
     <div class="step-heading">Select <span class="hl">Project</span></div>
-    <div class="step-sub">Open the project folder to auto-fill details and save reports.</div>
+    <div class="step-sub">${isIOS
+      ? 'Load the project config file to auto-fill details.'
+      : 'Open the project folder to auto-fill details and save reports.'}</div>
 
     ${hasPrj ? `
       <div class="project-card">
         <div class="project-card-num">${escH(S.project.jobNumber)}</div>
         <div class="project-card-name">${escH(S.project.name)}</div>
       </div>
-      <button class="btn btn-ghost btn-full" onclick="pickProjectFolder()">🔄 &nbsp;Change Project Folder</button>
+      ${isIOS ? `
+        <div style="position:relative;overflow:hidden;">
+          <button class="btn btn-ghost btn-full">\uD83D\uDD04 &nbsp;Load Different Config</button>
+          <input type="file" accept="application/json,.json" onchange="handleConfigFile(this.files[0])"
+            style="position:absolute;inset:0;opacity:0;cursor:pointer;font-size:100px;">
+        </div>
+      ` : `<button class="btn btn-ghost btn-full" onclick="pickProjectFolder()">\uD83D\uDD04 &nbsp;Change Project Folder</button>`}
+    ` : isIOS ? `
+      <div class="card" style="background:var(--card);border-radius:var(--r);padding:20px;box-shadow:var(--sh);margin-bottom:16px;">
+        <div style="font-family:var(--fh);font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px;">Load Project Config</div>
+        <p style="font-size:14px;color:var(--text-dim);margin-bottom:14px;">
+          Select the <strong>project-data.json</strong> from your project's <em>06_Inspections</em> folder on OneDrive.
+        </p>
+        <div style="position:relative;overflow:hidden;">
+          <button class="btn btn-primary btn-full">\uD83D\uDCC2 &nbsp;Choose project-data.json</button>
+          <input type="file" accept="application/json,.json" onchange="handleConfigFile(this.files[0])"
+            style="position:absolute;inset:0;opacity:0;cursor:pointer;font-size:100px;">
+        </div>
+      </div>
+      <p style="font-size:14px;color:var(--text-muted);text-align:center;">
+        Or skip \u2014 enter details manually on the next step.
+      </p>
     ` : `
       <button class="btn btn-primary btn-full" style="margin-bottom:12px;" onclick="pickProjectFolder()">
-        📁 &nbsp;Open Project Folder
+        \uD83D\uDCC1 &nbsp;Open Project Folder
       </button>
       <p style="font-size:14px;color:var(--text-muted);text-align:center;">
-        Or skip this step — you can enter details manually and download the report.
+        Or skip this step \u2014 enter details manually and download the report.
       </p>
     `}`;
 }
-
 /* ═══════════════════════════════════════
    STEP 2 — DETAILS
 ═══════════════════════════════════════ */
@@ -1361,9 +1420,11 @@ function renderReview() {
     </div>`;
   }).join('');
 
-  const saveNote = S.fsSupported && S.projectHandle
+  const saveNote = (S.fsSupported && S.projectHandle && !S.projectHandle._iosMode)
     ? `Will save PDF to <strong>${escH(S.project.folderName)}/06_Inspections/${escH(fname)}.pdf</strong>`
-    : `Will download ${escH(fname)}.pdf`;
+    : S.shareSupported
+      ? `Will open share sheet — save to Files, OneDrive, or email`
+      : `Will download <strong>${escH(fname)}.pdf</strong>`;
 
   return `
     <div class="step-heading">Review & <span class="hl">Generate</span></div>
@@ -2180,7 +2241,7 @@ async function doGenerate() {
       }
     }
 
-    if (S.fsSupported && S.projectHandle) {
+    if (S.fsSupported && S.projectHandle && !S.projectHandle._iosMode) {
       loading('Saving PDF…');
       const siDir = await getOrCreate06(S.projectHandle);
       const fhPdf = await siDir.getFileHandle(fname + '.pdf', { create: true });
@@ -2194,10 +2255,30 @@ async function doGenerate() {
       const attachNote = S.attachmentBytes ? ' (with attachment)' : '';
       toast('✓ Saved → ' + S.project.folderName + '/06_Inspections/' + fname + '.pdf' + attachNote, 'success');
     } else {
-      saveAs(new Blob([finalBytes], { type: 'application/pdf' }), fname + '.pdf');
-      loadingHide();
+      const blob = new Blob([finalBytes], { type: 'application/pdf' });
       const attachNote = S.attachmentBytes ? ' (with attachment)' : '';
-      toast('✓ Downloaded: ' + fname + '.pdf' + attachNote, 'success');
+      // Use Web Share API on iOS — triggers native share sheet (save to Files, OneDrive, email…)
+      if (S.shareSupported) {
+        try {
+          const file = new File([blob], fname + '.pdf', { type: 'application/pdf' });
+          await navigator.share({ files: [file], title: fname });
+          loadingHide();
+          toast('✓ PDF ready to save' + attachNote, 'success');
+        } catch (shareErr) {
+          if (shareErr.name !== 'AbortError') {
+            // Share failed — fall back to download
+            saveAs(blob, fname + '.pdf');
+            loadingHide();
+            toast('✓ Downloaded: ' + fname + '.pdf' + attachNote, 'success');
+          } else {
+            loadingHide(); // User cancelled share sheet — that's fine
+          }
+        }
+      } else {
+        saveAs(blob, fname + '.pdf');
+        loadingHide();
+        toast('✓ Downloaded: ' + fname + '.pdf' + attachNote, 'success');
+      }
     }
 
   } catch (e) {
