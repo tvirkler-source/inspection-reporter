@@ -652,7 +652,7 @@ try {
 </script>
 <script>
 'use strict';
-// VERSION: v1.3.2 - Rename _config.json to project-data.json
+// VERSION: v1.3.3 - Fix Table 1 char-spacing (bold overflow bug) + multi-line wrap
 
 /* ═══════════════════════════════════════
    EMBEDDED LOGOS (base64 PNG)
@@ -2058,8 +2058,8 @@ function generatePDF(fname) {
       opts.forEach((opt, oi) => {
         if (oi === 0) {
           approvalRows.push([
-            { content: el, rowSpan: 3, styles: { valign: 'middle', fontStyle: 'bold' } },
-            { content: '[ ]  ' + opt }
+            { content: el, rowSpan: opts.length, styles: { valign: 'middle', fontStyle: 'bold' } },
+            { content: '[ ]  ' + opt, styles: { fontStyle: 'normal' } }
           ]);
         } else {
           approvalRows.push([{ content: '[ ]  ' + opt }]);
@@ -2085,15 +2085,15 @@ function generatePDF(fname) {
     tableLineColor: RED,
     tableLineWidth: 0.3,
     styles: {
-      fontStyle: 'bold',
       fontSize: 10,
+      overflow: 'linebreak',
       lineColor: RED,
       lineWidth: 0.3,
       cellPadding: { top: 1.5, bottom: 1.5, left: 3, right: 3 }
     },
     columnStyles: {
-      0: { cellWidth: 65 },
-      1: { cellWidth: 115, overflow: 'linebreak' }
+      0: { cellWidth: 62, fontStyle: 'bold' },
+      1: { cellWidth: 118, fontStyle: 'normal', overflow: 'linebreak' }
     },
     body: approvalRows,
     didAddPage: onNewPage
